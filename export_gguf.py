@@ -42,8 +42,6 @@ MAP = {
     "fc.weight": "fc.weight",
     "hidden_norm.weight": "enc.output_norm.weight",
     "candidate_selector.predecessor_codebook": "selector_predecessor.weight",
-    "candidate_selector.successor_codebook": "selector_successor.weight",
-    "candidate_selector.hidden_projection.weight": "selector_hidden.weight",
     "norm.weight": "output_norm.weight",
 }
 
@@ -118,6 +116,19 @@ writer.add_file_type(30)  # BF16
 
 written = 0
 missing = []
+# селекторы первыми (память на пике в конце - их транспозиция 242МБ)
+for hf, g in [('candidate_selector.predecessor_codebook', 'selector_predecessor.weight'),
+              ('candidate_selector.successor_codebook', 'selector_successor.weight'),
+              ('candidate_selector.hidden_projection.weight', 'selector_hidden.weight')]:
+    if hf in state:
+        arr = state.pop(hf).half().numpy()
+        want = gguf_shape[g]
+        if tuple(arr.shape) != want and tuple(arr.T.shape) == want:
+            arr = np.ascontiguousarray(arr.T)
+        writer.add_tensor(g, arr)
+        del arr
+        import gc; gc.collect()
+        written += 1
 for hf, g in MAP.items():
     for n in (list(range(N_LAYERS)) if "{n}" in hf else [None]):
         hkey = hf.format(n=n) if n is not None else hf
@@ -126,7 +137,7 @@ for hf, g in MAP.items():
             if "blk." not in gkey:
                 missing.append(gkey)
             continue
-        arr = state.pop(hkey).float().numpy()
+        arr = state.pop(hkey).half().numpy()
         want = gguf_shape[gkey]
         if tuple(arr.shape) != want:
             if tuple(arr.T.shape) == want:
